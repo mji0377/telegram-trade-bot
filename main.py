@@ -13,7 +13,7 @@ client = OpenAI(
 )
 
 # =========================
-# 시작 화면 (이미지 제거 버전)
+# 시작 화면 (버튼만)
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -21,43 +21,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🛠 봇 관리 문의", callback_data="bot")],
         [InlineKeyboardButton("🎰 파칭코 제휴문의", callback_data="pachinko")],
         [InlineKeyboardButton("💬 기타 문의", callback_data="etc")],
-        [InlineKeyboardButton("📞 상담원 연결", callback_data="admin")]
+        [InlineKeyboardButton("📞 상담원 요청", callback_data="admin")]
     ]
 
     await update.message.reply_text(
         "👋 안녕하세요 고객님\n\n"
-        "📞 24시간 자동 고객센터입니다\n"
-        "원하시는 메뉴를 선택하시면 AI가 자동으로 상담해드립니다\n\n"
-        "⚡ 상담원 연결도 가능합니다",
+        "24시간 자동 고객센터입니다.\n"
+        "아래 버튼을 선택하면 AI가 즉시 상담을 시작합니다.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 # =========================
-# 버튼 처리
+# 버튼 (중요: 절대 응답 제한 X)
 # =========================
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
     await query.answer()
 
-    if query.data == "bot":
-        await query.message.reply_text("🛠 봇 관리 문의입니다. 내용을 입력해주세요")
-
-    elif query.data == "pachinko":
-        await query.message.reply_text("🎰 파칭코 제휴 문의입니다. 내용을 입력해주세요")
-
-    elif query.data == "etc":
-        await query.message.reply_text("💬 기타 문의입니다. 내용을 입력해주세요")
-
-    elif query.data == "admin":
+    # 👉 여기서 아무 "기다려주세요" 같은거 절대 금지
+    if query.data == "admin":
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"📞 상담원 연결 요청\n유저ID: {query.from_user.id}"
+            text=f"📞 상담원 요청\n유저ID: {query.from_user.id}"
         )
-        await query.message.reply_text("📞 상담원에게 연결 요청을 전달했습니다. 잠시만 기다려주세요")
+        await query.message.reply_text("📞 상담원 요청이 전달되었습니다.")
+        return
+
+    # 👉 버튼은 그냥 “상담 시작 트리거”일 뿐
+    await query.message.reply_text("이제 상담을 시작합니다. 내용을 입력해주세요.")
 
 # =========================
-# 메시지 처리 (핵심)
+# 핵심: 모든 메시지는 AI가 처리
 # =========================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -65,56 +60,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     text = user_message.lower()
 
-    # 관리자 알림
+    # 관리자 알림 (항상)
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=f"📩 문의 도착\n\n👤 {user_id}\n💬 {user_message}"
+        text=f"📩 문의\n👤 {user_id}\n💬 {user_message}"
     )
 
     # =========================
-    # 상담원 호출만 예외 처리
+    # 상담원 요청만 예외 처리
     # =========================
-    if "상담원" in text or "직원" in text or "사람" in text:
+    if "상담원" in text or "직원" in text:
 
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"📞 상담원 요청\n유저ID: {user_id}\n내용: {user_message}"
+            text=f"📞 상담원 직접 요청\n유저ID: {user_id}\n내용: {user_message}"
         )
 
-        await update.message.reply_text(
-            "📞 상담원 연결 요청이 접수되었습니다.\n잠시만 기다려주세요."
-        )
+        await update.message.reply_text("📞 상담원 연결 요청이 접수되었습니다.")
         return
 
     # =========================
-    # 금액 질문 자동 응답
-    # =========================
-    price_keywords = ["얼마", "가격", "비용", "금액"]
-
-    if any(word in text for word in price_keywords):
-
-        await update.message.reply_text(
-            "🛠 봇 관리 설정 비용은 20만원입니다.\n\n"
-            "금액 조정이 필요한 경우 상담원 연결을 통해 안내드립니다."
-        )
-        return
-
-    # =========================
-    # 파칭코 자동 응답
-    # =========================
-    if "파칭코" in text:
-
-        await update.message.reply_text(
-            "🎰 파칭코 제휴 금액 안내\n\n"
-            "1달 25만원\n"
-            "3달 65만원\n"
-            "평생 100만원\n\n"
-            "금액 조정은 상담원 연결 부탁드립니다."
-        )
-        return
-
-    # =========================
-    # 🚀 핵심: 항상 AI가 응답 (절대 막지 않음)
+    # AI가 모든 상담 처리 (핵심)
     # =========================
     try:
         completion = client.chat.completions.create(
@@ -123,8 +89,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {
                     "role": "system",
                     "content": (
-                        "너는 친절한 24시간 고객센터 상담원이다. "
-                        "사용자의 질문에 항상 자연스럽고 구체적으로 답변해라."
+                        "너는 실제 24시간 고객센터 상담원이다. "
+                        "사용자의 질문에 절대 거절하지 말고, 항상 자연스럽고 상세하게 답변한다. "
+                        "가격 문의, 제휴 문의, 일반 문의 모두 상담센터 직원처럼 처리한다."
                     )
                 },
                 {
@@ -142,28 +109,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 # =========================
-# 관리자 답장 기능
-# =========================
-async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.message.chat_id != ADMIN_ID:
-        return
-
-    if len(context.args) < 2:
-        await update.message.reply_text("사용법: /reply user_id 내용")
-        return
-
-    user_id = int(context.args[0])
-    text = " ".join(context.args[1:])
-
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=f"📞 상담원 답변\n\n{text}"
-    )
-
-    await update.message.reply_text("전송 완료")
-
-# =========================
 # 실행
 # =========================
 app = Application.builder().token(BOT_TOKEN).build()
@@ -171,7 +116,6 @@ app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-app.add_handler(CommandHandler("reply", reply))
 
 print("BOT STARTED")
 app.run_polling()
