@@ -1,5 +1,12 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 from openai import OpenAI
 import os
 
@@ -18,28 +25,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💰 가격문의", callback_data="price")],
         [InlineKeyboardButton("🤝 제휴문의", callback_data="partner")],
         [InlineKeyboardButton("📞 관리자 연결", callback_data="admin")],
-        [InlineKeyboardButton("❓ 기타문의", callback_data="etc")]
+        [InlineKeyboardButton("❓ 기타문의", callback_data="etc")],
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
         "안녕하세요 👋\n실시간 고객센터입니다.\n원하시는 메뉴를 선택해주세요.",
-        reply_markup=reply_markup
+        reply_markup=reply_markup,
     )
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
     await query.answer()
 
-    responses = {
+    messages = {
         "price": "가격 문의를 선택하셨습니다 😊",
         "partner": "제휴 문의를 선택하셨습니다 🤝",
-        "admin": "관리자 연결 요청이 전달되었습니다 📞",
-        "etc": "문의 내용을 입력해주세요 😊"
+        "admin": "관리자에게 연결 요청을 전달했습니다 📞",
+        "etc": "문의 내용을 입력해주세요 😊",
     }
 
-    await query.message.reply_text(responses[query.data])
+    await query.message.reply_text(messages[query.data])
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -47,28 +55,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=f"📩 새 문의:\n\n{user_message}"
+        text=f"📩 새 문의 도착\n\n{user_message}",
     )
 
-    completion = client.chat.completions.create(
-        model="deepseek/deepseek-chat-v3-0324:free",
-        messages=[
-            {
-                "role": "system",
-                "content": "너는 실제 텔레그램 고객센터 상담원처럼 친절하게 답변한다."
-            },
-            {
-                "role": "user",
-                "content": user_message
-            }
-        ]
-    )
+    try:
+        completion = client.chat.completions.create(
+            model="deepseek/deepseek-chat-v3-0324:free",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "너는 친절한 텔레그램 고객센터 상담원이다.",
+                },
+                {
+                    "role": "user",
+                    "content": user_message,
+                },
+            ],
+        )
 
-    ai_reply = completion.choices[0].message.content
+        ai_reply = completion.choices[0].message.content
+
+    except Exception:
+        ai_reply = "현재 문의가 많아 잠시 후 다시 시도해주세요 🙏"
 
     await update.message.reply_text(ai_reply)
 
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+app = Application.builder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button))
