@@ -1,19 +1,18 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-from openai import OpenAI
 import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY,
-)
+# =========================
+# 상태 저장 (간단 버전)
+# =========================
+queue_number = 0
+active_sessions = {}  # user_id -> queue_number
 
 # =========================
-# 시작 화면 (버튼만)
+# 시작 화면
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -21,25 +20,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🛠 봇 관리 문의", callback_data="bot")],
         [InlineKeyboardButton("🎰 파칭코 제휴문의", callback_data="pachinko")],
         [InlineKeyboardButton("💬 기타 문의", callback_data="etc")],
-        [InlineKeyboardButton("📞 상담원 요청", callback_data="admin")]
+        [InlineKeyboardButton("📞 상담원 연결", callback_data="admin")]
     ]
 
     await update.message.reply_text(
         "👋 안녕하세요 고객님\n\n"
-        "24시간 자동 고객센터입니다.\n"
-        "아래 버튼을 선택하면 AI가 즉시 상담을 시작합니다.",
+        "문의 유형을 선택해주세요.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 # =========================
-# 버튼 (중요: 절대 응답 제한 X)
+# 버튼 처리
 # =========================
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
     await query.answer()
 
-    # 👉 여기서 아무 "기다려주세요" 같은거 절대 금지
     if query.data == "admin":
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -48,65 +45,86 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("📞 상담원 요청이 전달되었습니다.")
         return
 
-    # 👉 버튼은 그냥 “상담 시작 트리거”일 뿐
-    await query.message.reply_text("이제 상담을 시작합니다. 내용을 입력해주세요.")
+    await query.message.reply_text("내용을 입력해 주세요.")
 
 # =========================
-# 핵심: 모든 메시지는 AI가 처리
+# 문의 접수 (대기번호 시스템)
 # =========================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    global queue_number
+
     user_id = update.message.from_user.id
     user_message = update.message.text
-    text = user_message.lower()
 
-    # 관리자 알림 (항상)
+    # =========================
+    # 대기번호 생성
+    # =========================
+    queue_number += 1
+    my_number = queue_number
+    active_sessions[user_id] = my_number
+
+    # 관리자 전달
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=f"📩 문의\n👤 {user_id}\n💬 {user_message}"
+        text=f"""📩 새 문의
+
+🎫 대기번호: {my_number}
+👤 유저ID: {user_id}
+💬 내용: {user_message}"""
     )
 
-    # =========================
-    # 상담원 요청만 예외 처리
-    # =========================
-    if "상담원" in text or "직원" in text:
+    # 유저 응답
+    await update.message.reply_text(
+        f"지금은 다른 상담중에 있어 조금만 기다려 주세요.\n\n"
+        f"🎫 대기번호: {my_number}"
+    )
 
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"📞 상담원 직접 요청\n유저ID: {user_id}\n내용: {user_message}"
-        )
+# =========================
+# 상담 종료 (/done)
+# =========================
+async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        await update.message.reply_text("📞 상담원 연결 요청이 접수되었습니다.")
+    if update.message.chat_id != ADMIN_ID:
         return
 
-    # =========================
-    # AI가 모든 상담 처리 (핵심)
-    # =========================
-    try:
-        completion = client.chat.completions.create(
-            model="deepseek/deepseek-chat-v3-0324:free",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "너는 실제 24시간 고객센터 상담원이다. "
-                        "사용자의 질문에 절대 거절하지 말고, 항상 자연스럽고 상세하게 답변한다. "
-                        "가격 문의, 제휴 문의, 일반 문의 모두 상담센터 직원처럼 처리한다."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": user_message
-                }
-            ]
-        )
+    if len(context.args) < 1:
+        await update.message.reply_text("사용법: /done user_id")
+        return
 
-        reply = completion.choices[0].message.content
+    user_id = int(context.args[0])
 
-    except:
-        reply = "현재 상담이 많아 잠시 후 다시 시도해주세요 🙏"
+    if user_id in active_sessions:
+        del active_sessions[user_id]
 
-    await update.message.reply_text(reply)
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="✅ 상담이 종료되었습니다. 이용해주셔서 감사합니다."
+    )
+
+    await update.message.reply_text("상담 종료 처리 완료")
+
+# =========================
+# 관리자 답장 (/reply)
+# =========================
+async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.message.chat_id != ADMIN_ID:
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text("사용법: /reply user_id 내용")
+        return
+
+    user_id = int(context.args[0])
+    text = " ".join(context.args[1:])
+
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=f"📞 상담원 답변\n\n{text}"
+    )
+
+    await update.message.reply_text("전송 완료")
 
 # =========================
 # 실행
@@ -116,6 +134,9 @@ app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+app.add_handler(CommandHandler("reply", reply))
+app.add_handler(CommandHandler("done", done))
 
 print("BOT STARTED")
 app.run_polling()
