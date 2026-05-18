@@ -25,9 +25,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.message.reply_text(
-        "👋 고객센터입니다\n\n문의 유형을 선택해주세요.",
+        "👋 고객센터입니다\n문의 유형을 선택해주세요.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+# =========================
+# 상담 생성
+# =========================
+def create_session(user_id):
+    global queue_number
+
+    queue_number += 1
+
+    sessions[user_id] = {
+        "no": queue_number,
+        "status": "ACTIVE",
+        "last_time": time.time()
+    }
+
+    return queue_number
 
 # =========================
 # 버튼 처리
@@ -48,22 +64,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text("내용을 입력해주세요.")
 
 # =========================
-# 상담 추가
-# =========================
-def create_session(user_id):
-    global queue_number
-
-    queue_number += 1
-
-    sessions[user_id] = {
-        "no": queue_number,
-        "status": "WAITING",
-        "last_time": time.time()
-    }
-
-    return queue_number
-
-# =========================
 # 메시지 처리
 # =========================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,14 +73,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = time.time()
 
     # =========================
-    # 종료 요청 (유저)
+    # 상담 종료 (유저)
     # =========================
     if text.lower() in ["종료", "끝", "/end", "상담종료"]:
 
-        if user_id in sessions:
-            sessions[user_id]["status"] = "END"
+        sessions.pop(user_id, None)
 
         await update.message.reply_text("✅ 상담이 종료되었습니다.")
+
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=f"❌ 상담 종료 요청\n유저ID: {user_id}"
@@ -88,14 +88,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # =========================
-    # 첫 문의 등록
+    # 신규 상담 생성
     # =========================
     if user_id not in sessions:
         no = create_session(user_id)
     else:
         no = sessions[user_id]["no"]
 
-    sessions[user_id]["status"] = "ACTIVE"
     sessions[user_id]["last_time"] = now
 
     # 관리자 전달
@@ -110,41 +109,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 유저 응답
     await update.message.reply_text(
-        f"⏳ 현재 상담 대기중입니다.\n"
-        f"🎫 대기번호: {no}\n\n"
-        f"잠시만 기다려 주세요."
+        f"⏳ 현재 상담 대기중입니다.\n🎫 대기번호: {no}"
     )
-
-# =========================
-# 자동 3분 종료
-# =========================
-async def auto_close(context: ContextTypes.DEFAULT_TYPE):
-
-    now = time.time()
-    to_remove = []
-
-    for user_id, data in sessions.items():
-
-        if data["status"] != "ACTIVE":
-            continue
-
-        if now - data["last_time"] > 180:
-
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="⛔ 3분 동안 응답이 없어 상담이 자동 종료되었습니다."
-            )
-
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"⛔ 자동 종료\n유저ID: {user_id}"
-            )
-
-            data["status"] = "END"
-            to_remove.append(user_id)
-
-    for uid in to_remove:
-        sessions.pop(uid, None)
 
 # =========================
 # 관리자 답장
@@ -204,9 +170,6 @@ app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CommandHandler("reply", reply))
 app.add_handler(CommandHandler("done", done))
-
-# 자동 종료 체크 (1분마다)
-app.job_queue.run_repeating(auto_close, interval=60, first=10)
 
 print("BOT STARTED")
 app.run_polling()
