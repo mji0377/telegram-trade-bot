@@ -24,11 +24,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📞 상담원 연결", callback_data="admin")]
     ]
 
-    await update.message.reply_photo(
-        photo="https://i.imgur.com/your-image.jpg",  # 여기 이미지 넣기
-
-        caption=
-"""👋 안녕하세요 고객님
+    await update.message.reply_text("👋 안녕하세요 고객님")
 
 📞 24시간 자동 고객센터입니다.
 
